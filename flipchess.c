@@ -30,15 +30,8 @@ static void text_input_callback(void* context) {
         if(app->input_state == FlipChessTextInputGame) {
             if(app->import_game == 1) {
                 strncpy(app->import_game_text, app->input_text, TEXT_SIZE);
-
-                uint8_t status = FlipChessStatusNone;
-                if(status == FlipChessStatusNone) {
-                    //notification_message(app->notification, &sequence_blink_cyan_100);
-                    flipchess_play_happy_bump(app);
-                } else {
-                    //notification_message(app->notification, &sequence_blink_red_100);
-                    flipchess_play_long_bump(app);
-                }
+                app->import_game_text[TEXT_SIZE] = '\0';
+                flipchess_play_happy_bump(app);
             }
             // reset input state
             app->input_state = FlipChessTextInputDefault;

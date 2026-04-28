@@ -56,13 +56,16 @@ bool flipchess_load_file(char* contents, const FlipChessFile file_type, const ch
     if(storage_file_open(settings_file, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
         char chr;
         int i = 0;
-        while((storage_file_read(settings_file, &chr, 1) == 1) &&
-              !storage_file_eof(settings_file)) {
+        // Read until a failed read (0 bytes) rather than checking EOF before
+        // saving the byte — the EOF flag is set after reading the last byte,
+        // so the old EOF-first check silently dropped the final character.
+        while(storage_file_read(settings_file, &chr, 1) == 1) {
             if(i < FILE_MAX_CHARS) {
                 contents[i] = chr;
             }
             i++;
         }
+        contents[i < FILE_MAX_CHARS ? i : FILE_MAX_CHARS] = '\0';
         ret = true;
     } else {
         contents[0] = '\0';

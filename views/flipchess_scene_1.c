@@ -348,8 +348,8 @@ uint8_t flipchess_turn(FlipChessScene1Model* model) {
                 SCL_recordGetMove(model->game.record, model->game.ply - 1, &s0, &s1, &p);
                 SCL_moveToString(model->game.board, s0, s1, p, model->moveString);
             }
-            break;
             model->paramExit = moveType;
+            break;
         }
     }
 
@@ -548,7 +548,9 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        model->squareSelected = (model->squareSelected + 1) % 64;
+                        // advance file, wrap within rank (stay on same rank)
+                        model->squareSelected =
+                            (model->squareSelected & 0x38) | ((model->squareSelected + 1) & 0x07);
                     }
                     flipchess_drawBoard(model);
                 },
@@ -562,6 +564,7 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
+                        // decrease rank, wrap within file (stay on same file)
                         model->squareSelected = (model->squareSelected + 56) % 64;
                     }
                     flipchess_drawBoard(model);
@@ -576,7 +579,9 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        model->squareSelected = (model->squareSelected + 63) % 64;
+                        // retreat file, wrap within rank (stay on same rank)
+                        model->squareSelected =
+                            (model->squareSelected & 0x38) | ((model->squareSelected - 1) & 0x07);
                     }
                     flipchess_drawBoard(model);
                 },
@@ -590,6 +595,7 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
+                        // increase rank, wrap within file (stay on same file)
                         model->squareSelected = (model->squareSelected + 8) % 64;
                     }
                     flipchess_drawBoard(model);
@@ -617,9 +623,13 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                 FlipChessScene1Model * model,
                 {
                     // first turn of round, probably player but could be AI
+                    uint8_t prevTurnState = model->turnState;
                     if(flipchess_turn(model) == FlipChessStatusReturn) {
                         if(app->sound == 1) flipchess_voice_a_strange_game();
                         flipchess_play_long_bump(app);
+                    } else if(prevTurnState == 1 && model->turnState == 0) {
+                        // turnState reset from waiting-for-dest to idle = illegal move
+                        flipchess_play_bad_bump(app);
                     }
                     flipchess_saveState(app, model);
                     flipchess_drawBoard(model);
