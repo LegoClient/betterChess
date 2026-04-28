@@ -677,6 +677,42 @@ void flipchess_scene_1_exit(void* context) {
     with_view_model(instance->view, FlipChessScene1Model * model, { model->paramExit = 0; }, true);
 }
 
+void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
+    FlipChess* app = (FlipChess*)app_context;
+    // Step 1: flag "thinking..." and trigger a redraw so the user sees it.
+    bool should_compute = false;
+    with_view_model(
+        instance->view,
+        FlipChessScene1Model * model,
+        {
+            if(model->game.state == SCL_GAME_STATE_PLAYING &&
+               !flipchess_isPlayerTurn(model) && !model->thinking) {
+                model->thinking = 1;
+                should_compute = true;
+            }
+        },
+        true);
+
+    if(!should_compute) return;
+
+    // Brief pause so the "thinking..." redraw fires before blocking computation.
+    furi_thread_flags_wait(0, FuriFlagWaitAny, THREAD_WAIT_TIME);
+
+    // Step 2: compute the AI move and update the board.
+    with_view_model(
+        instance->view,
+        FlipChessScene1Model * model,
+        {
+            if(flipchess_turn(model) == FlipChessStatusReturn) {
+                if(app->sound == 1) flipchess_voice_a_strange_game();
+                flipchess_play_long_bump(app);
+            }
+            flipchess_saveState(app, model);
+            flipchess_drawBoard(model);
+        },
+        true);
+}
+
 void flipchess_scene_1_enter(void* context) {
     furi_assert(context);
     FlipChessScene1* instance = (FlipChessScene1*)context;
@@ -688,16 +724,21 @@ void flipchess_scene_1_enter(void* context) {
         instance->view,
         FlipChessScene1Model * model,
         {
-            // load imported game if applicable
-            char* import_game_text = NULL;
-            if(app->import_game == 1 && strlen(app->import_game_text) > 0) {
-                import_game_text = app->import_game_text;
+            int init;
+            if(app->watch_mode == 1) {
+                // Watch mode: both sides AI1, always a fresh game.
+                init = flipchess_scene_1_model_init(model, 1, 1, NULL);
             } else {
-                if(app->sound == 1) flipchess_voice_how_about_chess();
+                // load imported game if applicable
+                char* import_game_text = NULL;
+                if(app->import_game == 1 && strlen(app->import_game_text) > 0) {
+                    import_game_text = app->import_game_text;
+                } else {
+                    if(app->sound == 1) flipchess_voice_how_about_chess();
+                }
+                init = flipchess_scene_1_model_init(
+                    model, app->white_mode, app->black_mode, import_game_text);
             }
-
-            int init = flipchess_scene_1_model_init(
-                model, app->white_mode, app->black_mode, import_game_text);
 
             if(init == FlipChessStatusNone) {
                 // perform initial turn, sets up and lets white

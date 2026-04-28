@@ -21,7 +21,12 @@ bool flipchess_scene_scene_1_on_event(void* context, SceneManagerEvent event) {
     FlipChess* app = context;
     bool consumed = false;
 
-    if(event.type == SceneManagerEventTypeCustom) {
+    if(event.type == SceneManagerEventTypeTick) {
+        if(app->watch_mode) {
+            flipchess_scene_1_tick(app->flipchess_scene_1, (void*)app);
+        }
+        consumed = true;
+    } else if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
         case FlipChessCustomEventScene1Left:
         case FlipChessCustomEventScene1Right:
@@ -48,6 +53,8 @@ bool flipchess_scene_scene_1_on_event(void* context, SceneManagerEvent event) {
 
 void flipchess_scene_scene_1_on_exit(void* context) {
     FlipChess* app = context;
+
+    app->watch_mode = 0;
 
     if(app->import_game == 1 && strlen(app->import_game_text) > 0) {
         flipchess_save_file(app->import_game_text, FlipChessFileBoard, NULL, false, true);

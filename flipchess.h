@@ -39,6 +39,7 @@ typedef struct {
     uint8_t sound;
     // Main menu options
     uint8_t import_game;
+    uint8_t watch_mode;
     // Text input
     uint8_t input_state;
     char import_game_text[TEXT_BUFFER_SIZE];

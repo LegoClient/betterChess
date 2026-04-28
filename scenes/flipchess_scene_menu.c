@@ -4,6 +4,7 @@ enum SubmenuIndex {
     SubmenuIndexScene1New = 10,
     SubmenuIndexScene1Resume,
     SubmenuIndexScene1Import,
+    SubmenuIndexScene1Watch,
     SubmenuIndexSettings,
 };
 
@@ -39,6 +40,13 @@ void flipchess_scene_menu_on_enter(void* context) {
     //     app);
 
     submenu_add_item(
+        app->submenu,
+        "Watch AI",
+        SubmenuIndexScene1Watch,
+        flipchess_scene_menu_submenu_callback,
+        app);
+
+    submenu_add_item(
         app->submenu, "Settings", SubmenuIndexSettings, flipchess_scene_menu_submenu_callback, app);
 
     submenu_set_selected_item(
@@ -67,6 +75,13 @@ bool flipchess_scene_menu_on_event(void* context, SceneManagerEvent event) {
             app->import_game = 1;
             scene_manager_set_scene_state(
                 app->scene_manager, FlipChessSceneMenu, SubmenuIndexScene1Resume);
+            scene_manager_next_scene(app->scene_manager, FlipChessSceneScene_1);
+            return true;
+        } else if(event.event == SubmenuIndexScene1Watch) {
+            app->import_game = 0;
+            app->watch_mode = 1;
+            scene_manager_set_scene_state(
+                app->scene_manager, FlipChessSceneMenu, SubmenuIndexScene1Watch);
             scene_manager_next_scene(app->scene_manager, FlipChessSceneScene_1);
             return true;
         } else if(event.event == SubmenuIndexScene1Import) {
