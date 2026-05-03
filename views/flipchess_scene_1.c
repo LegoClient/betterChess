@@ -79,12 +79,17 @@ void flipchess_putImagePixel(uint8_t pixel, uint16_t index) {
     picture[index] = pixel;
 }
 
-// Format a captured-pieces strip into `out`, e.g. "W:pp B:RN".
-//   White's gain is the lowercase (black) pieces missing from the board;
-//   Black's gain is the uppercase (white) pieces missing.
+// Fill two captured-pieces strips, one per side:
+//   w_out gets "W:<black pieces missing>" (white's captures, lowercase)
+//   b_out gets "B:<white pieces missing>" (black's captures, uppercase)
 // Pieces are printed in descending value: Q, R, B, N, P. Kings are skipped
 // because the king is never captured (game ends in mate first).
-void flipchess_format_captured(SCL_Board board, char* out, uint8_t out_size) {
+void flipchess_format_captured(
+    SCL_Board board,
+    char* w_out,
+    uint8_t w_size,
+    char* b_out,
+    uint8_t b_size) {
     // Index order: Q, R, B, N, P. Initial counts per side.
     const uint8_t initial[5] = {1, 2, 2, 2, 8};
     const char white_letters[5] = {'Q', 'R', 'B', 'N', 'P'};
@@ -110,31 +115,33 @@ void flipchess_format_captured(SCL_Board board, char* out, uint8_t out_size) {
         }
     }
 
-    uint8_t pos = 0;
-    if(pos + 2 < out_size) {
-        out[pos++] = 'W';
-        out[pos++] = ':';
-    }
     // White's captures = black pieces missing
+    uint8_t pos = 0;
+    if(pos + 2 < w_size) {
+        w_out[pos++] = 'W';
+        w_out[pos++] = ':';
+    }
     for(int i = 0; i < 5; i++) {
         int missing = (int)initial[i] - (int)b_on_board[i];
-        for(int j = 0; j < missing && pos + 1 < out_size; j++) {
-            out[pos++] = black_letters[i];
+        for(int j = 0; j < missing && pos + 1 < w_size; j++) {
+            w_out[pos++] = black_letters[i];
         }
     }
-    if(pos + 4 < out_size) {
-        out[pos++] = ' ';
-        out[pos++] = 'B';
-        out[pos++] = ':';
-    }
+    w_out[pos < w_size ? pos : w_size - 1] = '\0';
+
     // Black's captures = white pieces missing
+    pos = 0;
+    if(pos + 2 < b_size) {
+        b_out[pos++] = 'B';
+        b_out[pos++] = ':';
+    }
     for(int i = 0; i < 5; i++) {
         int missing = (int)initial[i] - (int)w_on_board[i];
-        for(int j = 0; j < missing && pos + 1 < out_size; j++) {
-            out[pos++] = white_letters[i];
+        for(int j = 0; j < missing && pos + 1 < b_size; j++) {
+            b_out[pos++] = white_letters[i];
         }
     }
-    out[pos < out_size ? pos : out_size - 1] = '\0';
+    b_out[pos < b_size ? pos : b_size - 1] = '\0';
 }
 
 uint8_t flipchess_stringsEqual(const char* s1, const char* s2, int max) {
@@ -446,7 +453,15 @@ void flipchess_scene_1_draw(Canvas* canvas, FlipChessScene1Model* model) {
     // Frame
     canvas_draw_frame(canvas, 0, 0, 66, 64);
 
-    // Side panel: 2 lines of recent move history, then eval, then captured strip.
+    // Side panel layout:
+    //   y=10  current msg (or "thinking...")
+    //   y=19  current move
+    //   y=31  previous move (just the algebraic move; we drop the redundant
+    //         "white played" / "black played" label since the current msg
+    //         + alternation already implies whose move it was)
+    //   y=43  evaluation, side-named: "White: 1.4", "Black: 0.5", or "Even"
+    //   y=52  W:<captured> (black pieces white has taken)
+    //   y=61  B:<captured> (white pieces black has taken)
     canvas_set_font(canvas, FontSecondary);
     if(model->thinking) {
         canvas_draw_str(canvas, 68, 10, "thinking...");
@@ -454,28 +469,35 @@ void flipchess_scene_1_draw(Canvas* canvas, FlipChessScene1Model* model) {
         canvas_draw_str(canvas, 68, 10, model->msg);
     }
     canvas_draw_str(canvas, 68, 19, model->moveString);
-    canvas_draw_str(canvas, 68, 31, model->msg2);
-    canvas_draw_str(canvas, 68, 40, model->moveString2);
+    canvas_draw_str(canvas, 68, 31, model->moveString2);
 
-    // Eval line, e.g. "Eval:+1.4". SCL_VALUE_PAWN is 256, so a raw eval can
-    // reach ~32k; promote to int32 so the *10 doesn't overflow.
+    // Eval line. SCL_VALUE_PAWN is 256, so a raw eval can reach ~32k;
+    // promote to int32 so the *10 doesn't overflow.
     char eval_buf[16];
     int32_t e10 = ((int32_t)model->cachedEval * 10) / (int32_t)SCL_VALUE_PAWN;
-    int32_t abs_e10 = e10 < 0 ? -e10 : e10;
-    snprintf(
-        eval_buf,
-        sizeof(eval_buf),
-        "Eval:%c%ld.%ld",
-        e10 < 0 ? '-' : '+',
-        (long)(abs_e10 / 10),
-        (long)(abs_e10 % 10));
-    canvas_draw_str(canvas, 68, 52, eval_buf);
+    if(e10 == 0) {
+        strncpy(eval_buf, "Even", sizeof(eval_buf) - 1);
+        eval_buf[sizeof(eval_buf) - 1] = '\0';
+    } else {
+        int32_t abs_e10 = e10 < 0 ? -e10 : e10;
+        snprintf(
+            eval_buf,
+            sizeof(eval_buf),
+            "%s: %ld.%ld",
+            e10 > 0 ? "White" : "Black",
+            (long)(abs_e10 / 10),
+            (long)(abs_e10 % 10));
+    }
+    canvas_draw_str(canvas, 68, 43, eval_buf);
 
-    // Captured-pieces strip. Compute fresh from the board each draw so we
-    // never have to invalidate a cache after undo or new game.
-    char captured_buf[24];
-    flipchess_format_captured(model->game.board, captured_buf, sizeof(captured_buf));
-    canvas_draw_str(canvas, 68, 61, captured_buf);
+    // Captured-pieces strips, one line per side. Computed fresh from the
+    // board each draw so undo / new game never desync the display.
+    char w_captured[14];
+    char b_captured[14];
+    flipchess_format_captured(
+        model->game.board, w_captured, sizeof(w_captured), b_captured, sizeof(b_captured));
+    canvas_draw_str(canvas, 68, 52, w_captured);
+    canvas_draw_str(canvas, 68, 61, b_captured);
 
     // Board
     for(uint16_t y = 0; y < SCL_BOARD_PICTURE_WIDTH; y++) {
@@ -829,6 +851,12 @@ void flipchess_scene_1_exit(void* context) {
 // in endless watch mode. ~3 seconds.
 #define WATCH_RESTART_TICKS 30
 
+// Minimum wall-clock time (ms) to "think" before each watch-mode AI move.
+// CPU1 in the early game can compute a reply in well under 100ms, which made
+// the spectator pace too fast to follow. This sleeps with the "thinking..."
+// label visible so each move takes at least this long end-to-end.
+#define WATCH_THINK_TIME_MS 500
+
 void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
     FlipChess* app = (FlipChess*)app_context;
 
@@ -874,8 +902,10 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
 
     if(!should_compute) return;
 
-    // Brief pause so the "thinking..." redraw fires before blocking computation.
-    furi_thread_flags_wait(0, FuriFlagWaitAny, THREAD_WAIT_TIME);
+    // Hold "thinking..." on screen for a noticeable beat before computing.
+    // This both lets the redraw fire and paces the watch-mode game so a
+    // viewer can actually follow the moves instead of seeing a blur.
+    furi_thread_flags_wait(0, FuriFlagWaitAny, WATCH_THINK_TIME_MS);
 
     // Phase 2: compute the AI move and update the board.
     with_view_model(
