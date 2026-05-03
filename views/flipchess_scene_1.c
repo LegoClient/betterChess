@@ -6,6 +6,7 @@
 #include <gui/elements.h>
 //#include <dolphin/dolphin.h>
 #include <string.h>
+#include <stdio.h>
 //#include "flipchess_icons.h"
 #include "../helpers/flipchess_voice.h"
 #include "../helpers/flipchess_haptic.h"
@@ -65,12 +66,75 @@ typedef struct {
     uint8_t squareTo;
     uint8_t turnState;
 
+    // Cached static evaluation of the current position (units: SCL_VALUE_PAWN).
+    int16_t cachedEval;
+    // Ticks elapsed since game-over while in watch mode; used to auto-restart.
+    uint8_t autoRestartTicks;
+
 } FlipChessScene1Model;
 
 static uint8_t picture[SCL_BOARD_PICTURE_WIDTH * SCL_BOARD_PICTURE_WIDTH];
 
 void flipchess_putImagePixel(uint8_t pixel, uint16_t index) {
     picture[index] = pixel;
+}
+
+// Format a captured-pieces strip into `out`, e.g. "W:pp B:RN".
+//   White's gain is the lowercase (black) pieces missing from the board;
+//   Black's gain is the uppercase (white) pieces missing.
+// Pieces are printed in descending value: Q, R, B, N, P. Kings are skipped
+// because the king is never captured (game ends in mate first).
+void flipchess_format_captured(SCL_Board board, char* out, uint8_t out_size) {
+    // Index order: Q, R, B, N, P. Initial counts per side.
+    const uint8_t initial[5] = {1, 2, 2, 2, 8};
+    const char white_letters[5] = {'Q', 'R', 'B', 'N', 'P'};
+    const char black_letters[5] = {'q', 'r', 'b', 'n', 'p'};
+
+    uint8_t w_on_board[5] = {0, 0, 0, 0, 0};
+    uint8_t b_on_board[5] = {0, 0, 0, 0, 0};
+
+    for(int i = 0; i < 64; i++) {
+        char p = board[i];
+        switch(p) {
+        case 'Q': w_on_board[0]++; break;
+        case 'R': w_on_board[1]++; break;
+        case 'B': w_on_board[2]++; break;
+        case 'N': w_on_board[3]++; break;
+        case 'P': w_on_board[4]++; break;
+        case 'q': b_on_board[0]++; break;
+        case 'r': b_on_board[1]++; break;
+        case 'b': b_on_board[2]++; break;
+        case 'n': b_on_board[3]++; break;
+        case 'p': b_on_board[4]++; break;
+        default: break;
+        }
+    }
+
+    uint8_t pos = 0;
+    if(pos + 2 < out_size) {
+        out[pos++] = 'W';
+        out[pos++] = ':';
+    }
+    // White's captures = black pieces missing
+    for(int i = 0; i < 5; i++) {
+        int missing = (int)initial[i] - (int)b_on_board[i];
+        for(int j = 0; j < missing && pos + 1 < out_size; j++) {
+            out[pos++] = black_letters[i];
+        }
+    }
+    if(pos + 4 < out_size) {
+        out[pos++] = ' ';
+        out[pos++] = 'B';
+        out[pos++] = ':';
+    }
+    // Black's captures = white pieces missing
+    for(int i = 0; i < 5; i++) {
+        int missing = (int)initial[i] - (int)w_on_board[i];
+        for(int j = 0; j < missing && pos + 1 < out_size; j++) {
+            out[pos++] = white_letters[i];
+        }
+    }
+    out[pos < out_size ? pos : out_size - 1] = '\0';
 }
 
 uint8_t flipchess_stringsEqual(const char* s1, const char* s2, int max) {
@@ -286,6 +350,9 @@ uint8_t flipchess_turn(FlipChessScene1Model* model) {
             SCL_squareSetClear(model->moveHighlight);
             SCL_squareSetAdd(model->moveHighlight, model->squareFrom);
             SCL_squareSetAdd(model->moveHighlight, model->squareTo);
+
+            // Cache the static evaluation so the side panel can show it.
+            model->cachedEval = SCL_boardEvaluateStatic(model->game.board);
         } else if(moveType == FlipChessStatusMoveUndo) {
             flipchess_shiftMessages(model);
 
@@ -294,6 +361,8 @@ uint8_t flipchess_turn(FlipChessScene1Model* model) {
 
             SCL_gameUndoMove(&(model->game));
             SCL_squareSetClear(model->moveHighlight);
+
+            model->cachedEval = SCL_boardEvaluateStatic(model->game.board);
         }
 
         switch(model->game.state) {
@@ -377,7 +446,7 @@ void flipchess_scene_1_draw(Canvas* canvas, FlipChessScene1Model* model) {
     // Frame
     canvas_draw_frame(canvas, 0, 0, 66, 64);
 
-    // Message
+    // Side panel: 2 lines of recent move history, then eval, then captured strip.
     canvas_set_font(canvas, FontSecondary);
     if(model->thinking) {
         canvas_draw_str(canvas, 68, 10, "thinking...");
@@ -387,8 +456,26 @@ void flipchess_scene_1_draw(Canvas* canvas, FlipChessScene1Model* model) {
     canvas_draw_str(canvas, 68, 19, model->moveString);
     canvas_draw_str(canvas, 68, 31, model->msg2);
     canvas_draw_str(canvas, 68, 40, model->moveString2);
-    canvas_draw_str(canvas, 68, 52, model->msg3);
-    canvas_draw_str(canvas, 68, 61, model->moveString3);
+
+    // Eval line, e.g. "Eval:+1.4". SCL_VALUE_PAWN is 256, so a raw eval can
+    // reach ~32k; promote to int32 so the *10 doesn't overflow.
+    char eval_buf[16];
+    int32_t e10 = ((int32_t)model->cachedEval * 10) / (int32_t)SCL_VALUE_PAWN;
+    int32_t abs_e10 = e10 < 0 ? -e10 : e10;
+    snprintf(
+        eval_buf,
+        sizeof(eval_buf),
+        "Eval:%c%ld.%ld",
+        e10 < 0 ? '-' : '+',
+        (long)(abs_e10 / 10),
+        (long)(abs_e10 % 10));
+    canvas_draw_str(canvas, 68, 52, eval_buf);
+
+    // Captured-pieces strip. Compute fresh from the board each draw so we
+    // never have to invalidate a cache after undo or new game.
+    char captured_buf[24];
+    flipchess_format_captured(model->game.board, captured_buf, sizeof(captured_buf));
+    canvas_draw_str(canvas, 68, 61, captured_buf);
 
     // Board
     for(uint16_t y = 0; y < SCL_BOARD_PICTURE_WIDTH; y++) {
@@ -411,12 +498,17 @@ static int flipchess_scene_1_model_init(
     model->paramAnalyze = 255; // depth of analysis
     model->paramMoves = 0;
     model->paramInfo = 1;
-    model->paramFlipBoard = 0;
+    // Auto-flip the board when the human is playing Black against the AI,
+    // so the player's pieces sit at the bottom of the screen as expected.
+    model->paramFlipBoard = (black_mode == 0 && white_mode != 0) ? 1 : 0;
     model->paramExit = FlipChessStatusNone;
     model->paramStep = 0;
     model->paramFEN = import_game_text;
     model->paramPGN = NULL;
     model->clockSeconds = -1;
+
+    model->cachedEval = 0;
+    model->autoRestartTicks = 0;
 
     SCL_Board emptyStartState = SCL_BOARD_START_STATE;
     memcpy(model->startState, &emptyStartState, sizeof(SCL_Board));
@@ -523,6 +615,52 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
     FlipChessScene1* instance = context;
     FlipChess* app = instance->context;
 
+    // Long-press OK = undo. Undoes the last AI reply plus the player's move
+    // when there's an AI opponent, so the human ends up on move again.
+    if(event->type == InputTypeLong && event->key == InputKeyOk) {
+        with_view_model(
+            instance->view,
+            FlipChessScene1Model * model,
+            {
+                if(model->game.ply > 0 &&
+                   model->game.state == SCL_GAME_STATE_PLAYING) {
+                    SCL_gameUndoMove(&(model->game));
+                    // If there's at least one AI player and a previous ply
+                    // exists, also undo so the human is back on move.
+                    if((model->paramPlayerW != 0 || model->paramPlayerB != 0) &&
+                       model->game.ply > 0) {
+                        SCL_gameUndoMove(&(model->game));
+                    }
+                    // Reset selection / move-in-progress state.
+                    model->turnState = 0;
+                    SCL_squareSetClear(model->moveHighlight);
+                    model->squareFrom = 255;
+                    model->squareTo = 255;
+                    // Refresh status line and clear pending move text.
+                    model->msg = SCL_boardWhitesTurn(model->game.board) ?
+                                     "white to move" :
+                                     "black to move";
+                    model->moveString[0] = '\0';
+                    // History lines below would otherwise still show the
+                    // move(s) we just undid, so blank them.
+                    model->msg2 = "";
+                    model->moveString2[0] = '\0';
+                    // Recompute eval for the restored position.
+                    model->cachedEval = SCL_boardEvaluateStatic(model->game.board);
+                    flipchess_drawBoard(model);
+                }
+            },
+            true);
+        flipchess_play_happy_bump(app);
+        // Persist the rolled-back position so Resume picks it up correctly.
+        with_view_model(
+            instance->view,
+            FlipChessScene1Model * model,
+            { flipchess_saveState(app, model); },
+            true);
+        return true;
+    }
+
     if(event->type == InputTypeRelease) {
         switch(event->key) {
         case InputKeyBack:
@@ -548,9 +686,10 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        // advance file, wrap within rank (stay on same rank)
-                        model->squareSelected =
-                            (model->squareSelected & 0x38) | ((model->squareSelected + 1) & 0x07);
+                        // Visual right: file +1 normally, file -1 when flipped.
+                        int delta = model->paramFlipBoard ? -1 : 1;
+                        model->squareSelected = (model->squareSelected & 0x38) |
+                                                ((model->squareSelected + delta) & 0x07);
                     }
                     flipchess_drawBoard(model);
                 },
@@ -564,8 +703,10 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        // decrease rank, wrap within file (stay on same file)
-                        model->squareSelected = (model->squareSelected + 56) % 64;
+                        // Visual down: rank -1 normally (+56 mod 64),
+                        // rank +1 when flipped (+8 mod 64).
+                        uint8_t step = model->paramFlipBoard ? 8 : 56;
+                        model->squareSelected = (model->squareSelected + step) % 64;
                     }
                     flipchess_drawBoard(model);
                 },
@@ -579,9 +720,10 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        // retreat file, wrap within rank (stay on same rank)
-                        model->squareSelected =
-                            (model->squareSelected & 0x38) | ((model->squareSelected - 1) & 0x07);
+                        // Visual left: file -1 normally, file +1 when flipped.
+                        int delta = model->paramFlipBoard ? 1 : -1;
+                        model->squareSelected = (model->squareSelected & 0x38) |
+                                                ((model->squareSelected + delta) & 0x07);
                     }
                     flipchess_drawBoard(model);
                 },
@@ -595,8 +737,9 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     if(model->squareSelectedLast != 255 && model->squareSelected == 255) {
                         model->squareSelected = model->squareSelectedLast;
                     } else {
-                        // increase rank, wrap within file (stay on same file)
-                        model->squareSelected = (model->squareSelected + 8) % 64;
+                        // Visual up: rank +1 normally (+8), rank -1 flipped (+56 mod 64).
+                        uint8_t step = model->paramFlipBoard ? 56 : 8;
+                        model->squareSelected = (model->squareSelected + step) % 64;
                     }
                     flipchess_drawBoard(model);
                 },
@@ -677,28 +820,59 @@ void flipchess_scene_1_exit(void* context) {
     with_view_model(instance->view, FlipChessScene1Model * model, { model->paramExit = 0; }, true);
 }
 
+// Number of 100ms ticks to leave the result on screen before auto-restarting
+// in endless watch mode. ~3 seconds.
+#define WATCH_RESTART_TICKS 30
+
 void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
     FlipChess* app = (FlipChess*)app_context;
-    // Step 1: flag "thinking..." and trigger a redraw so the user sees it.
+
+    // Phase 1: decide whether to (a) auto-restart, (b) start computing a move,
+    // or (c) do nothing. All decisions are made under the model lock so the
+    // game state is consistent.
     bool should_compute = false;
+    bool should_restart = false;
     with_view_model(
         instance->view,
         FlipChessScene1Model * model,
         {
-            if(model->game.state == SCL_GAME_STATE_PLAYING &&
-               !flipchess_isPlayerTurn(model) && !model->thinking) {
+            if(model->game.state != SCL_GAME_STATE_PLAYING) {
+                // Game over: count down ticks, then restart.
+                if(model->autoRestartTicks < WATCH_RESTART_TICKS) {
+                    model->autoRestartTicks++;
+                } else {
+                    model->autoRestartTicks = 0;
+                    should_restart = true;
+                }
+            } else if(!flipchess_isPlayerTurn(model) && !model->thinking) {
                 model->thinking = 1;
                 should_compute = true;
             }
         },
         true);
 
+    if(should_restart) {
+        // Re-init the model with a fresh AI vs AI game and play the first move.
+        with_view_model(
+            instance->view,
+            FlipChessScene1Model * model,
+            {
+                flipchess_scene_1_model_init(model, 1, 1, NULL);
+                if(flipchess_turn(model) != FlipChessStatusReturn) {
+                    flipchess_saveState(app, model);
+                    flipchess_drawBoard(model);
+                }
+            },
+            true);
+        return;
+    }
+
     if(!should_compute) return;
 
     // Brief pause so the "thinking..." redraw fires before blocking computation.
     furi_thread_flags_wait(0, FuriFlagWaitAny, THREAD_WAIT_TIME);
 
-    // Step 2: compute the AI move and update the board.
+    // Phase 2: compute the AI move and update the board.
     with_view_model(
         instance->view,
         FlipChessScene1Model * model,
