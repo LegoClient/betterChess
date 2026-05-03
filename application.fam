@@ -1,6 +1,6 @@
 App(
-    appid="chess",
-    name="Chess",
+    appid="betterchess",
+    name="betterChess",
     apptype=FlipperAppType.EXTERNAL,
     entry_point="flipchess_app",
     requires=[
