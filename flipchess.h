@@ -40,6 +40,10 @@ typedef struct {
     // Main menu options
     uint8_t import_game;
     uint8_t watch_mode;
+    // Watch-AI settings
+    uint8_t watch_ai_level;     // CPU level used by both sides (1-3)
+    uint8_t watch_speed;        // index into speed table (0=Fast .. 3=V.Slow)
+    uint8_t watch_autorestart;  // 0 = stop at game over, 1 = auto-restart
     // Text input
     uint8_t input_state;
     char import_game_text[TEXT_BUFFER_SIZE];

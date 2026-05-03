@@ -77,6 +77,10 @@ FlipChess* flipchess_app_alloc() {
     // Main menu
     app->import_game = 0;
     app->watch_mode = 0;
+    // Watch-AI defaults: CPU1, Normal speed, auto-restart on
+    app->watch_ai_level = 1;
+    app->watch_speed = 1;
+    app->watch_autorestart = 1;
 
     // Text input
     app->input_state = FlipChessTextInputDefault;

@@ -70,6 +70,9 @@ typedef struct {
     int16_t cachedEval;
     // Ticks elapsed since game-over while in watch mode; used to auto-restart.
     uint8_t autoRestartTicks;
+    // While > 0, the watch-mode tick will keep showing "thinking..." and
+    // hold off the AI computation. Counts down one per 100 ms tick.
+    uint8_t thinkingTicksRemaining;
 
 } FlipChessScene1Model;
 
@@ -531,6 +534,7 @@ static int flipchess_scene_1_model_init(
 
     model->cachedEval = 0;
     model->autoRestartTicks = 0;
+    model->thinkingTicksRemaining = 0;
 
     SCL_Board emptyStartState = SCL_BOARD_START_STATE;
     memcpy(model->startState, &emptyStartState, sizeof(SCL_Board));
@@ -851,18 +855,24 @@ void flipchess_scene_1_exit(void* context) {
 // in endless watch mode. ~3 seconds.
 #define WATCH_RESTART_TICKS 30
 
-// Minimum wall-clock time (ms) to "think" before each watch-mode AI move.
-// CPU1 in the early game can compute a reply in well under 100ms, which made
-// the spectator pace too fast to follow. This sleeps with the "thinking..."
-// label visible so each move takes at least this long end-to-end.
-#define WATCH_THINK_TIME_MS 500
+// Per-speed "thinking..." dwell, in 100 ms ticks. Indexed by app->watch_speed
+// (0=Fast, 1=Normal, 2=Slow, 3=V.Slow). This is *minimum* dwell -- AI
+// computation time stacks on top.
+static const uint8_t watch_speed_ticks[4] = {2, 5, 10, 20};
 
 void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
     FlipChess* app = (FlipChess*)app_context;
 
-    // Phase 1: decide whether to (a) auto-restart, (b) start computing a move,
-    // or (c) do nothing. All decisions are made under the model lock so the
-    // game state is consistent.
+    // Tick-driven state machine for watch mode. We deliberately do NOT
+    // furi_thread_flags_wait() here -- that blocks the GUI thread, which
+    // queues the user's Back press until the wait + AI computation
+    // finish. Instead each phase yields, the next 100 ms tick re-enters,
+    // and input events get a chance to run between ticks.
+    //
+    //   game over     -> count ticks toward auto-restart (if enabled)
+    //   thinking + N>0 -> decrement N, redraw, wait another tick
+    //   thinking + N=0 -> compute the AI move
+    //   AI's turn      -> arm thinking, set N from speed setting
     bool should_compute = false;
     bool should_restart = false;
     with_view_model(
@@ -870,16 +880,30 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
         FlipChessScene1Model * model,
         {
             if(model->game.state != SCL_GAME_STATE_PLAYING) {
-                // Game over: count down ticks, then restart.
-                if(model->autoRestartTicks < WATCH_RESTART_TICKS) {
-                    model->autoRestartTicks++;
-                } else {
-                    model->autoRestartTicks = 0;
-                    should_restart = true;
+                if(app->watch_autorestart) {
+                    if(model->autoRestartTicks < WATCH_RESTART_TICKS) {
+                        model->autoRestartTicks++;
+                    } else {
+                        model->autoRestartTicks = 0;
+                        should_restart = true;
+                    }
                 }
-            } else if(!flipchess_isPlayerTurn(model) && !model->thinking) {
-                model->thinking = 1;
+                // Auto-restart off: do nothing, leave the result on screen
+                // until the user presses Back.
+            } else if(model->thinking && model->thinkingTicksRemaining > 0) {
+                // Still pacing the move; let the dispatcher service
+                // input events between ticks.
+                model->thinkingTicksRemaining--;
+            } else if(model->thinking) {
+                // Dwell elapsed -- next thing this tick handler does is
+                // run the AI, which will reset thinking when it returns.
                 should_compute = true;
+            } else if(!flipchess_isPlayerTurn(model)) {
+                // AI's turn just came up. Arm the thinking dwell and
+                // redraw so "thinking..." appears immediately.
+                model->thinking = 1;
+                uint8_t idx = app->watch_speed < 4 ? app->watch_speed : 1;
+                model->thinkingTicksRemaining = watch_speed_ticks[idx];
             }
         },
         true);
@@ -890,7 +914,10 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
             instance->view,
             FlipChessScene1Model * model,
             {
-                flipchess_scene_1_model_init(model, 1, 1, NULL);
+                uint8_t lvl = app->watch_ai_level >= 1 && app->watch_ai_level <= 3 ?
+                                  app->watch_ai_level :
+                                  1;
+                flipchess_scene_1_model_init(model, lvl, lvl, NULL);
                 if(flipchess_turn(model) != FlipChessStatusReturn) {
                     flipchess_saveState(app, model);
                     flipchess_drawBoard(model);
@@ -902,12 +929,10 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
 
     if(!should_compute) return;
 
-    // Hold "thinking..." on screen for a noticeable beat before computing.
-    // This both lets the redraw fire and paces the watch-mode game so a
-    // viewer can actually follow the moves instead of seeing a blur.
-    furi_thread_flags_wait(0, FuriFlagWaitAny, WATCH_THINK_TIME_MS);
-
-    // Phase 2: compute the AI move and update the board.
+    // Compute the AI move. This still blocks the GUI thread for the
+    // duration of the search, but the dwell loop above means a viewer
+    // pressing Back during the dwell phase gets a response within one
+    // tick (~100 ms) instead of waiting for the full speed setting.
     with_view_model(
         instance->view,
         FlipChessScene1Model * model,
@@ -935,8 +960,12 @@ void flipchess_scene_1_enter(void* context) {
         {
             int init;
             if(app->watch_mode == 1) {
-                // Watch mode: both sides AI1, always a fresh game.
-                init = flipchess_scene_1_model_init(model, 1, 1, NULL);
+                // Watch mode: both sides at the configured AI level,
+                // always a fresh game (no FEN import).
+                uint8_t lvl = app->watch_ai_level >= 1 && app->watch_ai_level <= 3 ?
+                                  app->watch_ai_level :
+                                  1;
+                init = flipchess_scene_1_model_init(model, lvl, lvl, NULL);
             } else {
                 // load imported game if applicable
                 char* import_game_text = NULL;
