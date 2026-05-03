@@ -27,6 +27,14 @@ const char* const watch_restart_text[2] = {
 };
 const uint32_t watch_restart_value[2] = {0, 1};
 
+const char* const watch_restart_delay_text[4] = {
+    "3s",
+    "10s",
+    "25s",
+    "60s",
+};
+const uint32_t watch_restart_delay_value[4] = {0, 1, 2, 3};
+
 static void flipchess_scene_watch_settings_set_ai_level(VariableItem* item) {
     FlipChess* app = variable_item_get_context(item);
     uint8_t index = variable_item_get_current_value_index(item);
@@ -46,6 +54,13 @@ static void flipchess_scene_watch_settings_set_restart(VariableItem* item) {
     uint8_t index = variable_item_get_current_value_index(item);
     variable_item_set_current_value_text(item, watch_restart_text[index]);
     app->watch_autorestart = (uint8_t)watch_restart_value[index];
+}
+
+static void flipchess_scene_watch_settings_set_restart_delay(VariableItem* item) {
+    FlipChess* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, watch_restart_delay_text[index]);
+    app->watch_restart_delay = (uint8_t)watch_restart_delay_value[index];
 }
 
 void flipchess_scene_watch_settings_on_enter(void* context) {
@@ -85,6 +100,18 @@ void flipchess_scene_watch_settings_on_enter(void* context) {
     value_index = value_index_uint32(app->watch_autorestart, watch_restart_value, 2);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, watch_restart_text[value_index]);
+
+    // Restart delay (only meaningful if auto-restart is on)
+    item = variable_item_list_add(
+        app->variable_item_list,
+        "Restart Wait:",
+        4,
+        flipchess_scene_watch_settings_set_restart_delay,
+        app);
+    value_index =
+        value_index_uint32(app->watch_restart_delay, watch_restart_delay_value, 4);
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, watch_restart_delay_text[value_index]);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, FlipChessViewIdSettings);
 }

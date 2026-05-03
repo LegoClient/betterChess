@@ -26,6 +26,19 @@ bool flipchess_scene_scene_1_on_event(void* context, SceneManagerEvent event) {
             flipchess_scene_1_tick(app->flipchess_scene_1, (void*)app);
         }
         consumed = true;
+    } else if(event.type == SceneManagerEventTypeBack) {
+        // Standard Back handling. Cancel an in-progress selection if there
+        // is one, otherwise let the scene manager pop us back to Menu.
+        if(flipchess_scene_1_try_cancel_selection(app->flipchess_scene_1)) {
+            consumed = true;
+        } else {
+            notification_message(app->notification, &sequence_reset_red);
+            notification_message(app->notification, &sequence_reset_green);
+            notification_message(app->notification, &sequence_reset_blue);
+            // Returning false here lets scene_manager_handle_back_event
+            // call scene_manager_previous_scene, which pops back to Menu.
+            consumed = false;
+        }
     } else if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
         case FlipChessCustomEventScene1Left:
@@ -33,17 +46,6 @@ bool flipchess_scene_scene_1_on_event(void* context, SceneManagerEvent event) {
             break;
         case FlipChessCustomEventScene1Up:
         case FlipChessCustomEventScene1Down:
-            break;
-        case FlipChessCustomEventScene1Back:
-            notification_message(app->notification, &sequence_reset_red);
-            notification_message(app->notification, &sequence_reset_green);
-            notification_message(app->notification, &sequence_reset_blue);
-            if(!scene_manager_search_and_switch_to_previous_scene(
-                   app->scene_manager, FlipChessSceneMenu)) {
-                scene_manager_stop(app->scene_manager);
-                view_dispatcher_stop(app->view_dispatcher);
-            }
-            consumed = true;
             break;
         }
     }

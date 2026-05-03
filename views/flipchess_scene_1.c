@@ -69,7 +69,7 @@ typedef struct {
     // Cached static evaluation of the current position (units: SCL_VALUE_PAWN).
     int16_t cachedEval;
     // Ticks elapsed since game-over while in watch mode; used to auto-restart.
-    uint8_t autoRestartTicks;
+    uint16_t autoRestartTicks;
     // While > 0, the watch-mode tick will keep showing "thinking..." and
     // hold off the AI computation. Counts down one per 100 ms tick.
     uint8_t thinkingTicksRemaining;
@@ -646,6 +646,17 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
     FlipChessScene1* instance = context;
     FlipChess* app = instance->context;
 
+    // Back is intentionally NOT consumed here -- returning false lets the
+    // view dispatcher route Short/Long Back to the navigation callback,
+    // which calls scene_manager_handle_back_event -> scene's Back handler.
+    // That path is reliable even when watch-mode AI compute briefly busy-
+    // blocks the GUI thread; the previous "send custom event from input"
+    // path could appear unresponsive because the custom event waited
+    // behind the next tick in the dispatcher queue.
+    if(event->key == InputKeyBack) {
+        return false;
+    }
+
     // Long-press OK = undo. Undoes the last AI reply plus the player's move
     // when there's an AI opponent, so the human ends up on move again.
     if(event->type == InputTypeLong && event->key == InputKeyOk) {
@@ -695,19 +706,9 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
     if(event->type == InputTypeRelease) {
         switch(event->key) {
         case InputKeyBack:
-            with_view_model(
-                instance->view,
-                FlipChessScene1Model * model,
-                {
-                    if(model->turnState == 1) {
-                        model->turnState = 0;
-                        SCL_squareSetClear(model->moveHighlight);
-                        flipchess_drawBoard(model);
-                    } else {
-                        instance->callback(FlipChessCustomEventScene1Back, instance->context);
-                    }
-                },
-                true);
+            // Back is handled via the navigation callback path; the early
+            // return at the top of this function ensures we never reach
+            // here for InputKeyBack. Listed only to satisfy -Wswitch.
             break;
         case InputKeyRight:
             with_view_model(
@@ -851,14 +852,31 @@ void flipchess_scene_1_exit(void* context) {
     with_view_model(instance->view, FlipChessScene1Model * model, { model->paramExit = 0; }, true);
 }
 
-// Number of 100ms ticks to leave the result on screen before auto-restarting
-// in endless watch mode. ~3 seconds.
-#define WATCH_RESTART_TICKS 30
+bool flipchess_scene_1_try_cancel_selection(FlipChessScene1* instance) {
+    bool cancelled = false;
+    with_view_model(
+        instance->view,
+        FlipChessScene1Model * model,
+        {
+            if(model->turnState == 1) {
+                model->turnState = 0;
+                SCL_squareSetClear(model->moveHighlight);
+                flipchess_drawBoard(model);
+                cancelled = true;
+            }
+        },
+        true);
+    return cancelled;
+}
 
 // Per-speed "thinking..." dwell, in 100 ms ticks. Indexed by app->watch_speed
 // (0=Fast, 1=Normal, 2=Slow, 3=V.Slow). This is *minimum* dwell -- AI
 // computation time stacks on top.
 static const uint8_t watch_speed_ticks[4] = {2, 5, 10, 20};
+
+// Auto-restart hold time after game-over, in 100 ms ticks. Indexed by
+// app->watch_restart_delay: 0=3s, 1=10s, 2=25s, 3=60s.
+static const uint16_t watch_restart_ticks[4] = {30, 100, 250, 600};
 
 void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
     FlipChess* app = (FlipChess*)app_context;
@@ -881,7 +899,11 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
         {
             if(model->game.state != SCL_GAME_STATE_PLAYING) {
                 if(app->watch_autorestart) {
-                    if(model->autoRestartTicks < WATCH_RESTART_TICKS) {
+                    uint8_t didx = app->watch_restart_delay < 4 ?
+                                       app->watch_restart_delay :
+                                       2;
+                    uint16_t target = watch_restart_ticks[didx];
+                    if(model->autoRestartTicks < target) {
                         model->autoRestartTicks++;
                     } else {
                         model->autoRestartTicks = 0;
