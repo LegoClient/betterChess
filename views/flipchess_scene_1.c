@@ -606,6 +606,11 @@ static int flipchess_scene_1_model_init(
 
     model->msg = (SCL_boardWhitesTurn(model->game.board) ? "white to move" : "black to move");
 
+    // Seed cached eval with the actual starting position so an imported FEN
+    // (or a fresh game where the player moves first) shows a real number
+    // instead of 0.0 until someone makes a move.
+    model->cachedEval = SCL_boardEvaluateStatic(model->game.board);
+
     // 0 = success
     return FlipChessStatusNone;
 }
