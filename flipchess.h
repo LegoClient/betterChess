@@ -45,6 +45,8 @@ typedef struct {
     uint8_t watch_speed;          // index into speed table (0=Fast .. 3=V.Slow)
     uint8_t watch_autorestart;    // 0 = stop at game over, 1 = auto-restart
     uint8_t watch_restart_delay;  // index into delay table (0=3s..3=60s)
+    uint8_t watch_flip_next;      // board orientation for the next watch game
+                                  // (toggles each game so we see both sides)
     // Text input
     uint8_t input_state;
     char import_game_text[TEXT_BUFFER_SIZE];

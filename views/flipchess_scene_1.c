@@ -965,6 +965,9 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
                                   1;
                 flipchess_scene_1_model_init(model, lvl, lvl, NULL);
                 model->watchCappedSearch = 1;
+                // Alternate orientation each restarted game.
+                model->paramFlipBoard = app->watch_flip_next;
+                app->watch_flip_next ^= 1;
                 if(flipchess_turn(model) != FlipChessStatusReturn) {
                     flipchess_saveState(app, model);
                     flipchess_drawBoard(model);
@@ -1016,6 +1019,10 @@ void flipchess_scene_1_enter(void* context) {
                 // Cap search extensions so the synchronous AI compute
                 // can't lock out Back for tens of seconds.
                 model->watchCappedSearch = 1;
+                // Alternate board orientation each watch game so we
+                // get to see both sides' perspective.
+                model->paramFlipBoard = app->watch_flip_next;
+                app->watch_flip_next ^= 1;
             } else {
                 // load imported game if applicable
                 char* import_game_text = NULL;

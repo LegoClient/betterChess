@@ -88,6 +88,9 @@ bool flipchess_scene_menu_on_event(void* context, SceneManagerEvent event) {
         } else if(event.event == SubmenuIndexScene1Watch) {
             app->import_game = 0;
             app->watch_mode = 1;
+            // First game of a watch session is always shown from white's
+            // perspective; subsequent auto-restarted games alternate.
+            app->watch_flip_next = 0;
             scene_manager_set_scene_state(
                 app->scene_manager, FlipChessSceneMenu, SubmenuIndexScene1Watch);
             scene_manager_next_scene(app->scene_manager, FlipChessSceneScene_1);
