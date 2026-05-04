@@ -175,9 +175,15 @@ int16_t flipchess_makeAIMove(
     uint8_t depth = (level > 0) ? level : 1;
     uint8_t extraDepth = 3;
     uint8_t endgameDepth = 1;
-    uint8_t randomness =
-        model->game.ply < 2 ? 1 : 0; /* in first moves increase randomness for different 
-                             openings */
+    // Default: opening randomness for variety, then deterministic.
+    uint8_t randomness = model->game.ply < 2 ? 1 : 0;
+    if(model->watchCappedSearch) {
+        // Watch mode plays itself, so deterministic play makes the
+        // games converge to the same outcome (white always wins at
+        // shallow depth). Keep noticeable randomness throughout so
+        // each restart produces a genuinely different game.
+        randomness = model->game.ply < 6 ? 2 : 1;
+    }
     uint8_t rs0, rs1;
 
     SCL_gameGetRepetiotionMove(&(model->game), &rs0, &rs1);
