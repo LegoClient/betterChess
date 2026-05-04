@@ -73,6 +73,11 @@ typedef struct {
     // While > 0, the watch-mode tick will keep showing "thinking..." and
     // hold off the AI computation. Counts down one per 100 ms tick.
     uint8_t thinkingTicksRemaining;
+    // When set, flipchess_makeAIMove caps the capture/endgame extensions
+    // so the synchronous search can't hog the GUI thread for tens of
+    // seconds. Used in watch (spectator) mode where Back must stay
+    // responsive without modifying smallchesslib for cancellation.
+    uint8_t watchCappedSearch;
 
 } FlipChessScene1Model;
 
@@ -194,6 +199,16 @@ int16_t flipchess_makeAIMove(
             depth = 3;
             extraDepth = 4;
         }
+    }
+
+    if(model->watchCappedSearch) {
+        // Watch mode runs the search synchronously on the GUI thread, so
+        // every move blocks input for the duration of SCL_getAIMove. Cap
+        // the capture/endgame extensions so even CPU3 finishes in a few
+        // seconds at worst -- otherwise Back stays unresponsive long
+        // enough for qFlipper to time out RPC input events.
+        if(extraDepth > 2) extraDepth = 2;
+        endgameDepth = 0;
     }
 
     return SCL_getAIMove(
@@ -535,6 +550,9 @@ static int flipchess_scene_1_model_init(
     model->cachedEval = 0;
     model->autoRestartTicks = 0;
     model->thinkingTicksRemaining = 0;
+    // Default off; the watch-mode entry path explicitly turns this on
+    // after init.
+    model->watchCappedSearch = 0;
 
     SCL_Board emptyStartState = SCL_BOARD_START_STATE;
     memcpy(model->startState, &emptyStartState, sizeof(SCL_Board));
@@ -940,6 +958,7 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
                                   app->watch_ai_level :
                                   1;
                 flipchess_scene_1_model_init(model, lvl, lvl, NULL);
+                model->watchCappedSearch = 1;
                 if(flipchess_turn(model) != FlipChessStatusReturn) {
                     flipchess_saveState(app, model);
                     flipchess_drawBoard(model);
@@ -988,6 +1007,9 @@ void flipchess_scene_1_enter(void* context) {
                                   app->watch_ai_level :
                                   1;
                 init = flipchess_scene_1_model_init(model, lvl, lvl, NULL);
+                // Cap search extensions so the synchronous AI compute
+                // can't lock out Back for tens of seconds.
+                model->watchCappedSearch = 1;
             } else {
                 // load imported game if applicable
                 char* import_game_text = NULL;
