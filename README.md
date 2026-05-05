@@ -6,7 +6,7 @@
 
 Chess for the Flipper Zero. Forked from [xtruan/flipper-chess](https://github.com/xtruan/flipper-chess) with a long list of bug fixes plus a hands-off **Watch AI** spectator mode, undo, evaluation display, captured-pieces strip, and configurable AI behaviour.
 
-Built against **Momentum mntm-011** (firmware API 86.0) — see [Building](#building) below.
+Built against (firmware API 86.0) — see [Building](#building) below.
 
 ## Features
 
@@ -37,7 +37,6 @@ Built against **Momentum mntm-011** (firmware API 86.0) — see [Building](#buil
 ### Settings
 - **White / Black**: Human, CPU 1, CPU 2, CPU 3
 - **Vibro / Haptic**: ON / OFF
-- **Sound**: ON / OFF (SAM voice-synth lines from *WarGames*)
 
 ### Side panel display
 - Current message + last move
@@ -85,4 +84,3 @@ To regenerate the app icons (`flipchess_10px.png` and `icons/FLIPR_128x64.png`),
 
 - Original [flipper-chess](https://github.com/xtruan/flipper-chess) by [Struan Clark (xtruan)](https://github.com/xtruan)
 - Chess engine: [smallchesslib](https://codeberg.org/drummyfish/smallchesslib) by drummyfish (CC0)
-- Voice lines: SAM speech synthesizer port (`sam/stm32_sam.cpp`)

@@ -8,7 +8,6 @@
 #include <string.h>
 #include <stdio.h>
 //#include "flipchess_icons.h"
-#include "../helpers/flipchess_voice.h"
 #include "../helpers/flipchess_haptic.h"
 
 #define SCL_960_CASTLING        0 // setting to 1 compiles a 960 version of smolchess
@@ -824,7 +823,6 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     // first turn of round, probably player but could be AI
                     uint8_t prevTurnState = model->turnState;
                     if(flipchess_turn(model) == FlipChessStatusReturn) {
-                        if(app->sound == 1) flipchess_voice_a_strange_game();
                         flipchess_play_long_bump(app);
                     } else if(prevTurnState == 1 && model->turnState == 0) {
                         // turnState reset from waiting-for-dest to idle = illegal move
@@ -853,7 +851,6 @@ bool flipchess_scene_1_input(InputEvent* event, void* context) {
                     // if player played, let AI play
                     if(!flipchess_isPlayerTurn(model)) {
                         if(flipchess_turn(model) == FlipChessStatusReturn) {
-                            if(app->sound == 1) flipchess_voice_a_strange_game();
                             flipchess_play_long_bump(app);
                         }
                         flipchess_saveState(app, model);
@@ -988,7 +985,6 @@ void flipchess_scene_1_tick(FlipChessScene1* instance, void* app_context) {
         FlipChessScene1Model * model,
         {
             if(flipchess_turn(model) == FlipChessStatusReturn) {
-                if(app->sound == 1) flipchess_voice_a_strange_game();
                 flipchess_play_long_bump(app);
             }
             flipchess_saveState(app, model);
@@ -1028,8 +1024,6 @@ void flipchess_scene_1_enter(void* context) {
                 char* import_game_text = NULL;
                 if(app->import_game == 1 && strlen(app->import_game_text) > 0) {
                     import_game_text = app->import_game_text;
-                } else {
-                    if(app->sound == 1) flipchess_voice_how_about_chess();
                 }
                 init = flipchess_scene_1_model_init(
                     model, app->white_mode, app->black_mode, import_game_text);

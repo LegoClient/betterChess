@@ -1,5 +1,4 @@
 #include "../flipchess.h"
-#include "../helpers/flipchess_voice.h"
 #include <lib/toolbox/value_index.h>
 
 #define TEXT_LABEL_ON  "ON"
@@ -14,12 +13,6 @@ const uint32_t haptic_value[2] = {
     FlipChessHapticOn,
 };
 
-const char* const sound_text[2] = {
-    TEXT_LABEL_OFF,
-    TEXT_LABEL_ON,
-};
-const uint32_t sound_value[2] = {0, 1};
-
 const char* const player_mode_text[4] = {
     "Human",
     "CPU 1",
@@ -32,13 +25,6 @@ const uint32_t player_mode_value[4] = {
     FlipChessPlayerAI2,
     FlipChessPlayerAI3,
 };
-
-static void flipchess_scene_settings_set_sound(VariableItem* item) {
-    FlipChess* app = variable_item_get_context(item);
-    uint8_t index = variable_item_get_current_value_index(item);
-    variable_item_set_current_value_text(item, sound_text[index]);
-    app->sound = (uint8_t)sound_value[index];
-}
 
 static void flipchess_scene_settings_set_haptic(VariableItem* item) {
     FlipChess* app = variable_item_get_context(item);
@@ -71,10 +57,6 @@ void flipchess_scene_settings_on_enter(void* context) {
     VariableItem* item;
     uint8_t value_index;
 
-    if(app->sound == 1) {
-        flipchess_voice_which_side();
-    }
-
     // White mode
     item = variable_item_list_add(
         app->variable_item_list, "White:", 4, flipchess_scene_settings_set_white_mode, app);
@@ -95,13 +77,6 @@ void flipchess_scene_settings_on_enter(void* context) {
     value_index = value_index_uint32(app->haptic, haptic_value, 2);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, haptic_text[value_index]);
-
-    // Sound on/off
-    item = variable_item_list_add(
-        app->variable_item_list, "Sound:", 2, flipchess_scene_settings_set_sound, app);
-    value_index = value_index_uint32(app->sound, sound_value, 2);
-    variable_item_set_current_value_index(item, value_index);
-    variable_item_set_current_value_text(item, sound_text[value_index]);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, FlipChessViewIdSettings);
 }
