@@ -2,31 +2,49 @@ name: Build
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
 
+# Pin the Momentum SDK release here so CI and local builds line up.
 env:
-  firmware_version: '1.1.2'
+  MOMENTUM_SDK_URL: https://github.com/Next-Flip/Momentum-Firmware/releases/download/mntm-011/flipper-z-f7-sdk-mntm-011.zip
 
 jobs:
   build:
-    name: Build
+    name: Build (Momentum mntm-011)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed by softprops/action-gh-release on tag pushes
     steps:
-      - name: Checkout Flipper Zero Firmware
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          repository: 'flipperdevices/flipperzero-firmware'
-          ref: ${{ env.firmware_version }}
-          submodules: true
-      - name: Checkout flipper-chess
-        uses: actions/checkout@v3
+          python-version: '3.12'
+
+      - name: Install ufbt
+        run: pip install --upgrade ufbt
+
+      - name: Pin ufbt to Momentum mntm-011 SDK
+        run: ufbt update --url=${{ env.MOMENTUM_SDK_URL }}
+
+      - name: Build betterchess.fap
+        run: ufbt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          path: 'applications_user/flipper-chess'
-      - name: Build FAPs
-        run: ./fbt COMPACT=1 DEBUG=0 faps
-      - name: Check flipper-chess Built
-        run: test -f build/f7-firmware-C/.extapps/chess.fap
-      - name: Check flipper-chess Size
-        run: ls -l --block-size=K build/f7-firmware-C/.extapps/chess.fap
+          name: betterchess-fap
+          path: dist/betterchess.fap
+          if-no-files-found: error
+
+      - name: Attach .fap to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/betterchess.fap
+          fail_on_unmatched_files: true
