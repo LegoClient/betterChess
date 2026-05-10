@@ -30,7 +30,7 @@ jobs:
         run: pip install --upgrade ufbt
 
       - name: Pin ufbt to Momentum mntm-011 SDK
-        run: ufbt update --url=${{ env.MOMENTUM_SDK_URL }}
+        run: ufbt update --hw-target=f7 --url=${{ env.MOMENTUM_SDK_URL }}
 
       - name: Build betterchess.fap
         run: ufbt
